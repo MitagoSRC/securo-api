@@ -145,4 +145,27 @@ app.get('/api/leads', (req, res) => {
   res.json(leads.reverse());
 });
 
+// 🔐 odbiór danych z WordPress
+app.post('/api/wp-data', (req, res) => {
+  const data = req.body;
+
+  console.log("📥 WP DATA:", data);
+
+  // możesz to zapisać jako audit
+  sites.push({
+    id: Date.now(),
+    url: data.site,
+    total: 100,
+    seo: 100,
+    security: 80,
+    performance: 80,
+    tech: ["WordPress"],
+    issues: data.issues || [],
+    alerts: [],
+    date: new Date().toISOString()
+  });
+
+  res.json({ success: true });
+});
+
 app.listen(process.env.PORT || 3000);
