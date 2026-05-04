@@ -5,25 +5,43 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 🔥 pseudo baza
+let users = [];
 let sites = [];
 
-// Strona główna
-app.get('/', (req, res) => {
-  res.send('Securo API działa 🚀');
-});
+// helper
+function findUser(email) {
+  return users.find(u => u.email === email);
+}
 
-// Lista wyników
-app.get('/api/sites', (req, res) => {
-  res.json(sites);
-});
+// 🔐 rejestracja
+app.post('/api/register', (req, res) => {
+  const { email, password } = req.body;
 
-// NOWY: prawdziwy audit po stronie serwera
-app.post('/api/run-audit', async (req, res) => {
-  const { url } = req.body;
-
-  if (!url) {
-    return res.status(400).json({ error: 'Brak URL' });
+  if (findUser(email)) {
+    return res.json({ error: "Użytkownik istnieje" });
   }
+
+  users.push({ email, password });
+  res.json({ success: true });
+});
+
+// 🔐 logowanie
+app.post('/api/login', (req, res) => {
+  const { email, password } = req.body;
+
+  const user = findUser(email);
+
+  if (!user || user.password !== password) {
+    return res.json({ error: "Błędne dane" });
+  }
+
+  res.json({ success: true, email });
+});
+
+// 🔍 audit
+app.post('/api/run-audit', async (req, res) => {
+  const { url, email } = req.body;
 
   let score = 100;
   let issues = [];
@@ -32,33 +50,29 @@ app.post('/api/run-audit', async (req, res) => {
     const response = await fetch(url);
     const html = await response.text();
 
-    // HTTPS
     if (!url.startsWith('https')) {
       score -= 20;
       issues.push('Brak HTTPS');
     }
 
-    // Title
     if (!html.toLowerCase().includes('<title>')) {
       score -= 10;
-      issues.push('Brak tagu <title>');
+      issues.push('Brak title');
     }
 
-    // Meta description
     if (!html.toLowerCase().includes('meta name="description"')) {
       score -= 10;
       issues.push('Brak meta description');
     }
 
-    // H1
     if (!html.toLowerCase().includes('<h1')) {
       score -= 10;
-      issues.push('Brak nagłówka H1');
+      issues.push('Brak H1');
     }
 
-  } catch (e) {
+  } catch {
     score = 0;
-    issues.push('Nie można pobrać strony');
+    issues.push('Strona niedostępna');
   }
 
   const result = {
@@ -66,6 +80,7 @@ app.post('/api/run-audit', async (req, res) => {
     url,
     score,
     issues,
+    email,
     date: new Date().toISOString()
   };
 
@@ -74,19 +89,31 @@ app.post('/api/run-audit', async (req, res) => {
   res.json(result);
 });
 
-// stary endpoint (zostawiamy)
-app.post('/api/audit', (req, res) => {
-  const { url, score } = req.body;
-
-  sites.push({
-    id: Date.now(),
-    url,
-    score,
-    date: new Date().toISOString()
-  });
-
-  res.json({ status: 'saved' });
+// 📦 pobierz tylko swoje dane
+app.get('/api/sites/:email', (req, res) => {
+  const userSites = sites.filter(s => s.email === req.params.email);
+  res.json(userSites);
 });
 
-// WAŻNE: port dla Render
+// 🔄 CRON (co 24h)
+setInterval(async () => {
+  console.log("Auto scan...");
+
+  for (let site of sites) {
+    try {
+      const response = await fetch(site.url);
+      const html = await response.text();
+
+      let score = 100;
+
+      if (!html.includes('<title>')) score -= 10;
+
+      site.score = score;
+      site.date = new Date().toISOString();
+
+    } catch {}
+  }
+
+}, 1000 * 60 * 60 * 24);
+
 app.listen(process.env.PORT || 3000);
