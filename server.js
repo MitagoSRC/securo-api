@@ -13,21 +13,30 @@ function normalize(url){
   return url.replace("http://","").replace("https://","").replace(/\/$/,"");
 }
 
-// 🔥 fetch z timeoutem (ważne)
-async function fetchWithTimeout(url, timeout = 5000){
+// 🔥 fetch z timeout + UA (KLUCZOWE)
+async function fetchSafe(url, timeout = 5000){
+
   const controller = new AbortController();
   const id = setTimeout(()=>controller.abort(), timeout);
 
   try{
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url,{
+      signal: controller.signal,
+      headers:{
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+      }
+    });
+
     clearTimeout(id);
     return res;
+
   }catch(e){
     clearTimeout(id);
     return null;
   }
 }
 
+// 🔥 MAIN
 app.post("/api/run-audit", async (req,res)=>{
 
   try{
@@ -44,10 +53,14 @@ app.post("/api/run-audit", async (req,res)=>{
 
     const start = Date.now();
 
-    const response = await fetchWithTimeout(url, 8000);
+    // 🔥 NAJWAŻNIEJSZE
+    const response = await fetchSafe(url, 6000);
 
     if(!response){
-      return res.json({error:true,message:"Strona nie odpowiada"});
+      return res.json({
+        error:true,
+        message:"Strona nie odpowiada / blokuje boty"
+      });
     }
 
     const html = await response.text();
@@ -59,19 +72,11 @@ app.post("/api/run-audit", async (req,res)=>{
     const meta = $('meta[name="description"]').attr("content");
     const h1 = $("h1").first().text();
 
-    // robots + sitemap (z timeoutem)
-    const base = new URL(url);
-
-    const robotsRes = await fetchWithTimeout(base.origin + "/robots.txt", 3000);
-    const sitemapRes = await fetchWithTimeout(base.origin + "/sitemap.xml", 3000);
-
     const checks = {
       seo:{
         title:!!title,
         metaDescription:!!meta,
-        h1:!!h1,
-        robotsTxt: robotsRes && robotsRes.status === 200,
-        sitemapXml: sitemapRes && sitemapRes.status === 200
+        h1:!!h1
       },
       security:{
         https:url.startsWith("https")
@@ -91,19 +96,21 @@ app.post("/api/run-audit", async (req,res)=>{
 
     history.push(data);
 
-    res.json(data);
+    // 🔥 ZAWSZE ODPOWIADAMY
+    return res.json(data);
 
   }catch(e){
 
     console.log("ERROR:", e.message);
 
-    res.json({
+    return res.json({
       error:true,
-      message:"Błąd analizy"
+      message:"Timeout / blokada strony"
     });
   }
 });
 
+// HISTORY
 app.get("/api/history",(req,res)=>{
   res.json(history);
 });
