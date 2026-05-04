@@ -8,109 +8,105 @@ app.use(express.json());
 let users = [];
 let sites = [];
 
-function findUser(email) {
-  return users.find(u => u.email === email);
+// 🔍 WYKRYWANIE TECHNOLOGII
+function detectTech(html) {
+  let tech = [];
+
+  if (html.includes("wp-content")) tech.push("WordPress");
+  if (html.includes("shopify")) tech.push("Shopify");
+  if (html.includes("_next")) tech.push("Next.js");
+  if (html.includes("react")) tech.push("React");
+  if (html.includes("vue")) tech.push("Vue");
+  if (html.includes("angular")) tech.push("Angular");
+
+  if (tech.length === 0) tech.push("Custom / HTML");
+
+  return tech;
 }
 
-// AUTH
-app.post('/api/register', (req, res) => {
-  const { email, password } = req.body;
-  if (findUser(email)) return res.json({ error: "User exists" });
-  users.push({ email, password });
-  res.json({ success: true });
-});
-
-app.post('/api/login', (req, res) => {
-  const { email, password } = req.body;
-  const user = findUser(email);
-  if (!user || user.password !== password)
-    return res.json({ error: "Bad login" });
-
-  res.json({ success: true, email });
-});
-
-// 🔥 AUDIT PRO
+// 🔥 AUDIT PRO++
 app.post('/api/run-audit', async (req, res) => {
-  const { url, email } = req.body;
+  const { url } = req.body;
 
-  let score = 100;
+  let seo = 100;
+  let security = 100;
+  let performance = 100;
+
   let issues = [];
   let passed = [];
 
   try {
+    const start = Date.now();
+
     const response = await fetch(url);
     const html = await response.text();
 
-    // HTTPS
-    if (!url.startsWith('https')) {
-      score -= 15;
-      issues.push("Brak HTTPS");
-    } else passed.push("HTTPS OK");
+    const loadTime = Date.now() - start;
 
-    // TITLE
-    if (!html.toLowerCase().includes('<title>')) {
-      score -= 10;
-      issues.push("Brak title");
-    } else passed.push("Title OK");
+    // 🔍 TECH
+    const tech = detectTech(html);
 
-    // META
-    if (!html.toLowerCase().includes('meta name="description"')) {
-      score -= 10;
-      issues.push("Brak meta description");
-    } else passed.push("Meta description OK");
+    // SEO
+    if (!html.includes("<title")) { seo -= 15; issues.push("Brak title"); }
+    else passed.push("Title OK");
 
-    // H1
-    if (!html.toLowerCase().includes('<h1')) {
-      score -= 10;
-      issues.push("Brak H1");
-    } else passed.push("H1 OK");
-
-    // ROBOTS
-    if (!await check(url + "/robots.txt")) {
-      score -= 5;
-      issues.push("Brak robots.txt");
-    } else passed.push("robots.txt OK");
-
-    // SITEMAP
-    if (!await check(url + "/sitemap.xml")) {
-      score -= 5;
-      issues.push("Brak sitemap.xml");
-    } else passed.push("Sitemap OK");
-
-    // WORDPRESS
-    if (html.includes("wp-content")) {
-      passed.push("WordPress wykryty");
-
-      if (html.includes("wp-json")) {
-        score -= 10;
-        issues.push("Otwarty REST API (/wp-json)");
-      }
+    if (!html.includes("meta name=\"description\"")) {
+      seo -= 10; issues.push("Brak meta description");
     }
 
-    // PERFORMANCE (prosty)
+    if (!html.includes("<h1")) {
+      seo -= 10; issues.push("Brak H1");
+    }
+
+    if (!(await check(url + "/sitemap.xml"))) {
+      seo -= 5; issues.push("Brak sitemap");
+    }
+
+    // SECURITY
+    if (!url.startsWith("https")) {
+      security -= 20; issues.push("Brak HTTPS");
+    }
+
+    if (html.includes("wp-json")) {
+      security -= 10; issues.push("Otwarty REST API");
+    }
+
+    // PERFORMANCE
+    if (loadTime > 2000) {
+      performance -= 20;
+      issues.push("Wolne ładowanie strony");
+    }
+
     if (html.length > 500000) {
-      score -= 10;
-      issues.push("Strona bardzo ciężka");
+      performance -= 10;
+      issues.push("Duży rozmiar strony");
     }
+
+    const total = Math.round((seo + security + performance) / 3);
+
+    const result = {
+      id: Date.now(),
+      url,
+      total,
+      seo,
+      security,
+      performance,
+      tech,
+      issues,
+      passed,
+      date: new Date().toISOString()
+    };
+
+    sites.push(result);
+
+    res.json(result);
 
   } catch {
-    score = 0;
-    issues.push("Strona niedostępna");
+    res.json({
+      total: 0,
+      issues: ["Strona niedostępna"]
+    });
   }
-
-  const result = {
-    id: Date.now(),
-    url,
-    score,
-    issues,
-    passed,
-    email,
-    date: new Date().toISOString()
-  };
-
-  sites.push(result);
-
-  res.json(result);
 });
 
 async function check(url) {
@@ -121,10 +117,5 @@ async function check(url) {
     return false;
   }
 }
-
-// USER DATA
-app.get('/api/sites/:email', (req, res) => {
-  res.json(sites.filter(s => s.email === req.params.email));
-});
 
 app.listen(process.env.PORT || 3000);
