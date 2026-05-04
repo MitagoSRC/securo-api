@@ -180,3 +180,19 @@ app.post('/api/wp-data', (req,res)=>{
 app.get('/api/wp-data', (req,res)=>{
   res.json(wpData.slice(-1)[0] || {});
 });
+
+const cors = require('cors');
+app.use(cors());
+app.use(express.json());
+
+let wpData = [];
+
+app.post('/api/wp-data', (req,res)=>{
+  console.log("WP DATA:", req.body);
+  wpData.push(req.body);
+  res.json({ok:true});
+});
+
+app.get('/api/wp-data', (req,res)=>{
+  res.json(wpData.slice(-1)[0] || {});
+});
