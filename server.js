@@ -5,10 +5,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-let users = [];
 let sites = [];
 
-// 🔍 WYKRYWANIE TECHNOLOGII
+// 🔍 wykrywanie technologii
 function detectTech(html) {
   let tech = [];
 
@@ -16,10 +15,8 @@ function detectTech(html) {
   if (html.includes("shopify")) tech.push("Shopify");
   if (html.includes("_next")) tech.push("Next.js");
   if (html.includes("react")) tech.push("React");
-  if (html.includes("vue")) tech.push("Vue");
-  if (html.includes("angular")) tech.push("Angular");
 
-  if (tech.length === 0) tech.push("Custom / HTML");
+  if (tech.length === 0) tech.push("Custom");
 
   return tech;
 }
@@ -33,7 +30,7 @@ app.post('/api/run-audit', async (req, res) => {
   let performance = 100;
 
   let issues = [];
-  let passed = [];
+  let alerts = [];
 
   try {
     const start = Date.now();
@@ -42,47 +39,46 @@ app.post('/api/run-audit', async (req, res) => {
     const html = await response.text();
 
     const loadTime = Date.now() - start;
+    const sizeKB = Math.round(html.length / 1024);
 
-    // 🔍 TECH
     const tech = detectTech(html);
 
     // SEO
     if (!html.includes("<title")) { seo -= 15; issues.push("Brak title"); }
-    else passed.push("Title OK");
-
-    if (!html.includes("meta name=\"description\"")) {
-      seo -= 10; issues.push("Brak meta description");
-    }
-
-    if (!html.includes("<h1")) {
-      seo -= 10; issues.push("Brak H1");
-    }
-
-    if (!(await check(url + "/sitemap.xml"))) {
-      seo -= 5; issues.push("Brak sitemap");
-    }
+    if (!html.includes("meta name=\"description\"")) { seo -= 10; issues.push("Brak meta description"); }
+    if (!html.includes("<h1")) { seo -= 10; issues.push("Brak H1"); }
 
     // SECURITY
-    if (!url.startsWith("https")) {
-      security -= 20; issues.push("Brak HTTPS");
-    }
+    if (!url.startsWith("https")) { security -= 20; issues.push("Brak HTTPS"); }
+    if (html.includes("wp-json")) { security -= 10; issues.push("Otwarty REST API"); }
 
-    if (html.includes("wp-json")) {
-      security -= 10; issues.push("Otwarty REST API");
-    }
-
-    // PERFORMANCE
+    // 🔥 PERFORMANCE (bardziej realistyczne)
     if (loadTime > 2000) {
+      performance -= 30;
+      issues.push("Bardzo wolna odpowiedź serwera");
+    } else if (loadTime > 1000) {
+      performance -= 15;
+      issues.push("Średni czas odpowiedzi");
+    }
+
+    if (sizeKB > 500) {
       performance -= 20;
-      issues.push("Wolne ładowanie strony");
-    }
-
-    if (html.length > 500000) {
+      issues.push("Strona bardzo ciężka (" + sizeKB + "KB)");
+    } else if (sizeKB > 200) {
       performance -= 10;
-      issues.push("Duży rozmiar strony");
+      issues.push("Strona mogłaby być lżejsza");
     }
 
-    const total = Math.round((seo + security + performance) / 3);
+    const total = Math.max(0, Math.round((seo + security + performance) / 3));
+
+    // 🔥 ALERT: czy zwolniła
+    const prev = sites
+      .filter(s => s.url === url)
+      .slice(-1)[0];
+
+    if (prev && loadTime > prev.loadTime + 500) {
+      alerts.push("⚠️ Strona zwolniła o ponad 500 ms");
+    }
 
     const result = {
       id: Date.now(),
@@ -91,9 +87,11 @@ app.post('/api/run-audit', async (req, res) => {
       seo,
       security,
       performance,
+      loadTime,
+      sizeKB,
       tech,
       issues,
-      passed,
+      alerts,
       date: new Date().toISOString()
     };
 
@@ -109,13 +107,11 @@ app.post('/api/run-audit', async (req, res) => {
   }
 });
 
-async function check(url) {
-  try {
-    const r = await fetch(url);
-    return r.status === 200;
-  } catch {
-    return false;
-  }
-}
+// historia dla domeny
+app.get('/api/history', (req, res) => {
+  const { url } = req.query;
+  const data = sites.filter(s => s.url === url);
+  res.json(data);
+});
 
 app.listen(process.env.PORT || 3000);
