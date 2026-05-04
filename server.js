@@ -3,26 +3,36 @@ const cors = require("cors");
 const puppeteer = require("puppeteer");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
 let history = [];
 
-// normalize
 function normalize(url){
   return url.replace("http://","").replace("https://","").replace(/\/$/,"");
 }
 
-// 🔥 REAL AUDIT
+// 🔥 AUDYT
 app.post("/api/run-audit", async (req,res)=>{
 
-  try{
+  console.log("➡️ START AUDIT");
 
+  try{
     let {url} = req.body;
-    if(!url.startsWith("http")) url = "https://" + url;
+
+    if(!url){
+      return res.json({error:"Brak URL"});
+    }
+
+    if(!url.startsWith("http")){
+      url = "https://" + url;
+    }
+
+    console.log("🌐 URL:", url);
 
     const browser = await puppeteer.launch({
-      args: ["--no-sandbox","--disable-setuid-sandbox"]
+      args:["--no-sandbox","--disable-setuid-sandbox"]
     });
 
     const page = await browser.newPage();
@@ -31,7 +41,7 @@ app.post("/api/run-audit", async (req,res)=>{
 
     await page.goto(url,{
       waitUntil:"networkidle2",
-      timeout:30000
+      timeout:20000
     });
 
     const loadTime = Date.now() - start;
@@ -46,12 +56,7 @@ app.post("/api/run-audit", async (req,res)=>{
 
     const h1 = await page.$eval("h1", el=>el.innerText).catch(()=>null);
 
-    // ===== PERFORMANCE =====
-    const metrics = await page.metrics();
-
-    const jsHeap = metrics.JSHeapUsedSize;
-
-    // ===== SECURITY =====
+    // ===== HEADERS =====
     const response = await page.goto(url);
     const headers = response.headers();
 
@@ -59,28 +64,25 @@ app.post("/api/run-audit", async (req,res)=>{
     const csp = headers["content-security-policy"];
     const xss = headers["x-xss-protection"];
 
-    // ===== TECHNOLOGY =====
-    const content = await page.content();
+    // ===== METRICS =====
+    const metrics = await page.metrics();
 
-    const tech = [];
-    if(content.includes("wp-content")) tech.push("WordPress");
-    if(content.includes("react")) tech.push("React");
+    const jsHeap = metrics.JSHeapUsedSize;
 
-    // ===== CHECKS =====
     const checks = {
-      seo: {
-        title: !!title,
-        meta: !!meta,
-        h1: !!h1
+      seo:{
+        title:!!title,
+        meta:!!meta,
+        h1:!!h1
       },
-      security: {
+      security:{
         https,
-        csp: !!csp,
-        xss: !!xss
+        csp:!!csp,
+        xss:!!xss
       },
-      performance: {
-        fast: loadTime < 2000,
-        jsHeap: jsHeap < 50_000_000
+      performance:{
+        fast:loadTime < 2000,
+        jsHeap:jsHeap < 50000000
       }
     };
 
@@ -96,7 +98,7 @@ app.post("/api/run-audit", async (req,res)=>{
       url: normalize(url),
       score,
       loadTime,
-      tech,
+      tech:["HTML"],
       checks,
       date:new Date().toISOString()
     };
@@ -105,18 +107,23 @@ app.post("/api/run-audit", async (req,res)=>{
 
     await browser.close();
 
+    console.log("✅ DONE");
+
     res.json(data);
 
   }catch(e){
-    console.log(e);
-    res.json({error:"audit failed"});
+    console.log("❌ ERROR:", e.message);
+    res.json({
+      error:true,
+      message:e.message
+    });
   }
 });
 
-// history
+// HISTORY
 app.get("/api/history",(req,res)=>{
   const url = normalize(req.query.url);
   res.json(history.filter(h=>h.url===url));
 });
 
-app.listen(3000,()=>console.log("🚀 REAL PRO AUDIT"));
+app.listen(3000,()=>console.log("🚀 API RUNNING"));
