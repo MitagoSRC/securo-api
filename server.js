@@ -169,3 +169,14 @@ app.post('/api/wp-data', (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000);
+
+let wpData = [];
+
+app.post('/api/wp-data', (req,res)=>{
+  wpData.push(req.body);
+  res.json({ok:true});
+});
+
+app.get('/api/wp-data', (req,res)=>{
+  res.json(wpData.slice(-1)[0] || {});
+});
