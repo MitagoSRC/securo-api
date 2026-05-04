@@ -1,9 +1,9 @@
 const express = require("express");
 const cors = require("cors");
-const fetch = require("node-fetch");
 const cheerio = require("cheerio");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
@@ -13,13 +13,13 @@ function normalize(url){
   return url.replace("http://","").replace("https://","").replace(/\/$/,"");
 }
 
-// 🔥 fetch z timeoutem
+// 🔥 fetch z timeoutem (ważne)
 async function fetchWithTimeout(url, timeout = 5000){
   const controller = new AbortController();
   const id = setTimeout(()=>controller.abort(), timeout);
 
   try{
-    const res = await fetch(url,{signal:controller.signal});
+    const res = await fetch(url, { signal: controller.signal });
     clearTimeout(id);
     return res;
   }catch(e){
@@ -33,6 +33,10 @@ app.post("/api/run-audit", async (req,res)=>{
   try{
 
     let {url} = req.body;
+
+    if(!url){
+      return res.json({error:true,message:"Brak URL"});
+    }
 
     if(!url.startsWith("http")){
       url = "https://" + url;
@@ -55,7 +59,7 @@ app.post("/api/run-audit", async (req,res)=>{
     const meta = $('meta[name="description"]').attr("content");
     const h1 = $("h1").first().text();
 
-    // 🔥 robots + sitemap z timeoutem
+    // robots + sitemap (z timeoutem)
     const base = new URL(url);
 
     const robotsRes = await fetchWithTimeout(base.origin + "/robots.txt", 3000);
@@ -95,7 +99,7 @@ app.post("/api/run-audit", async (req,res)=>{
 
     res.json({
       error:true,
-      message:"Błąd analizy (timeout lub blokada strony)"
+      message:"Błąd analizy"
     });
   }
 });
@@ -104,4 +108,4 @@ app.get("/api/history",(req,res)=>{
   res.json(history);
 });
 
-app.listen(3000,()=>console.log("API OK"));
+app.listen(3000,()=>console.log("🚀 API OK"));
