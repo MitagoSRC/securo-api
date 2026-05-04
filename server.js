@@ -9,15 +9,27 @@ app.use(express.json());
 let history = [];
 let wpDataStore = {};
 
-// 🔍 FAKE AUDIT (Twój istniejący może być bardziej rozbudowany)
+// 🔧 NORMALIZACJA URL (KLUCZOWE)
+function normalizeUrl(url){
+  if(!url) return "";
+
+  return url
+    .replace("http://","")
+    .replace("https://","")
+    .replace(/\/$/,"") // usuń końcowy /
+    .toLowerCase();
+}
+
+// 🔍 AUDYT
 app.post("/api/run-audit", async (req, res) => {
 
   const { url } = req.body;
+  const cleanUrl = normalizeUrl(url);
 
   const loadTime = Math.floor(Math.random() * 2000) + 500;
 
   const data = {
-    url,
+    url: cleanUrl,
     total: 80 + Math.floor(Math.random() * 20),
     seo: 70 + Math.floor(Math.random() * 30),
     security: 70 + Math.floor(Math.random() * 30),
@@ -35,23 +47,27 @@ app.post("/api/run-audit", async (req, res) => {
 
 // 📊 HISTORIA
 app.get("/api/history", (req, res) => {
-  const { url } = req.query;
-  const filtered = history.filter(h => h.url === url);
+  const cleanUrl = normalizeUrl(req.query.url);
+  const filtered = history.filter(h => h.url === cleanUrl);
   res.json(filtered);
 });
 
-// 🔥 📥 ZAPIS WP
+// 🔥 📥 WP DATA
 app.post("/api/wp-data", (req, res) => {
 
   const data = req.body;
 
-  console.log("📥 WP DATA:", data);
+  console.log("📥 RAW WP:", data);
 
   if (!data || !data.site) {
     return res.json({ success: false });
   }
 
-  wpDataStore[data.site] = {
+  const key = normalizeUrl(data.site);
+
+  console.log("🔑 SAVED AS:", key);
+
+  wpDataStore[key] = {
     ...data,
     updated: new Date().toISOString()
   };
@@ -59,13 +75,15 @@ app.post("/api/wp-data", (req, res) => {
   res.json({ success: true });
 });
 
-// 🔥 📤 POBIERANIE WP
+// 🔥 📤 WP DATA GET
 app.get("/api/wp-data", (req, res) => {
 
-  const url = req.query.url;
+  const key = normalizeUrl(req.query.url);
 
-  if (url && wpDataStore[url]) {
-    return res.json(wpDataStore[url]);
+  console.log("🔍 LOOKING FOR:", key);
+
+  if (key && wpDataStore[key]) {
+    return res.json(wpDataStore[key]);
   }
 
   const last = Object.values(wpDataStore).slice(-1)[0];
