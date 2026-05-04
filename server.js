@@ -6,91 +6,132 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 🔐 Pamięć (na start — później można dać DB)
 let history = [];
 let wpDataStore = {};
 
-// 🔧 NORMALIZACJA URL (KLUCZOWE)
-function normalizeUrl(url){
-  if(!url) return "";
+// 🔧 NORMALIZACJA URL (klucz do działania WP)
+function normalizeUrl(url) {
+  if (!url) return "";
 
   return url
-    .replace("http://","")
-    .replace("https://","")
-    .replace(/\/$/,"") // usuń końcowy /
+    .replace("http://", "")
+    .replace("https://", "")
+    .replace(/\/$/, "")
     .toLowerCase();
 }
 
-// 🔍 AUDYT
+// =======================
+// 🔍 AUDYT STRONY
+// =======================
 app.post("/api/run-audit", async (req, res) => {
+  try {
+    const { url } = req.body;
 
-  const { url } = req.body;
-  const cleanUrl = normalizeUrl(url);
+    const cleanUrl = normalizeUrl(url);
 
-  const loadTime = Math.floor(Math.random() * 2000) + 500;
+    // 🔥 symulacja (tu możesz później podpiąć realny crawler)
+    const loadTime = Math.floor(Math.random() * 1500) + 500;
 
-  const data = {
-    url: cleanUrl,
-    total: 80 + Math.floor(Math.random() * 20),
-    seo: 70 + Math.floor(Math.random() * 30),
-    security: 70 + Math.floor(Math.random() * 30),
-    performance: 60 + Math.floor(Math.random() * 40),
-    loadTime,
-    tech: ["HTML", "JS"],
-    issues: [],
-    date: new Date().toISOString()
-  };
+    const seo = 70 + Math.floor(Math.random() * 30);
+    const security = 75 + Math.floor(Math.random() * 25);
+    const performance = 60 + Math.floor(Math.random() * 40);
 
-  history.push(data);
+    const issues = [];
 
-  res.json(data);
+    if (seo < 85) issues.push("Brak meta description");
+    if (performance < 70) issues.push("Strona wolno się ładuje");
+    if (security < 80) issues.push("Otwarty REST API");
+
+    const data = {
+      url: cleanUrl,
+      total: Math.round((seo + security + performance) / 3),
+      seo,
+      security,
+      performance,
+      loadTime,
+      tech: ["HTML", "JavaScript"],
+      issues,
+      date: new Date().toISOString()
+    };
+
+    history.push(data);
+
+    res.json(data);
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "audit error" });
+  }
 });
 
+// =======================
 // 📊 HISTORIA
+// =======================
 app.get("/api/history", (req, res) => {
   const cleanUrl = normalizeUrl(req.query.url);
   const filtered = history.filter(h => h.url === cleanUrl);
   res.json(filtered);
 });
 
-// 🔥 📥 WP DATA
+// =======================
+// 📥 WORDPRESS (ZAPIS)
+// =======================
 app.post("/api/wp-data", (req, res) => {
+  try {
+    const data = req.body;
 
-  const data = req.body;
+    console.log("📥 WP DATA:", data);
 
-  console.log("📥 RAW WP:", data);
+    if (!data || !data.site) {
+      return res.json({ success: false });
+    }
 
-  if (!data || !data.site) {
-    return res.json({ success: false });
+    const key = normalizeUrl(data.site);
+
+    wpDataStore[key] = {
+      ...data,
+      updated: new Date().toISOString()
+    };
+
+    console.log("✅ SAVED FOR:", key);
+
+    res.json({ success: true });
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "wp save error" });
   }
-
-  const key = normalizeUrl(data.site);
-
-  console.log("🔑 SAVED AS:", key);
-
-  wpDataStore[key] = {
-    ...data,
-    updated: new Date().toISOString()
-  };
-
-  res.json({ success: true });
 });
 
-// 🔥 📤 WP DATA GET
+// =======================
+// 📤 WORDPRESS (POBIERANIE)
+// =======================
 app.get("/api/wp-data", (req, res) => {
+  try {
+    const key = normalizeUrl(req.query.url);
 
-  const key = normalizeUrl(req.query.url);
+    console.log("🔍 GET WP FOR:", key);
 
-  console.log("🔍 LOOKING FOR:", key);
+    if (key && wpDataStore[key]) {
+      return res.json(wpDataStore[key]);
+    }
 
-  if (key && wpDataStore[key]) {
-    return res.json(wpDataStore[key]);
+    const last = Object.values(wpDataStore).slice(-1)[0];
+
+    res.json(last || {});
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "wp read error" });
   }
-
-  const last = Object.values(wpDataStore).slice(-1)[0];
-
-  res.json(last || {});
 });
 
-app.listen(3000, () => {
-  console.log("Server działa na porcie 3000");
+// =======================
+// 🚀 START SERWERA
+// =======================
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("🚀 Securo API działa na porcie", PORT);
 });
