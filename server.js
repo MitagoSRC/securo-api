@@ -6,6 +6,7 @@ app.use(cors());
 app.use(express.json());
 
 let sites = [];
+let leads = [];
 
 // 🔍 wykrywanie technologii
 function detectTech(html) {
@@ -39,45 +40,57 @@ app.post('/api/run-audit', async (req, res) => {
     const html = await response.text();
 
     const loadTime = Date.now() - start;
-    const sizeKB = Math.round(html.length / 1024);
-
     const tech = detectTech(html);
 
     // SEO
-    if (!html.includes("<title")) { seo -= 15; issues.push("Brak title"); }
-    if (!html.includes("meta name=\"description\"")) { seo -= 10; issues.push("Brak meta description"); }
-    if (!html.includes("<h1")) { seo -= 10; issues.push("Brak H1"); }
-
-    // SECURITY
-    if (!url.startsWith("https")) { security -= 20; issues.push("Brak HTTPS"); }
-    if (html.includes("wp-json")) { security -= 10; issues.push("Otwarty REST API"); }
-
-    // 🔥 PERFORMANCE (bardziej realistyczne)
-    if (loadTime > 2000) {
-      performance -= 30;
-      issues.push("Bardzo wolna odpowiedź serwera");
-    } else if (loadTime > 1000) {
-      performance -= 15;
-      issues.push("Średni czas odpowiedzi");
+    if (!html.includes("<title")) {
+      seo -= 15;
+      issues.push("Brak title");
+      alerts.push("❗ Strona może nie pojawiać się poprawnie w Google");
     }
 
-    if (sizeKB > 500) {
-      performance -= 20;
-      issues.push("Strona bardzo ciężka (" + sizeKB + "KB)");
-    } else if (sizeKB > 200) {
-      performance -= 10;
-      issues.push("Strona mogłaby być lżejsza");
+    if (!html.includes("meta name=\"description\"")) {
+      seo -= 10;
+      issues.push("Brak meta description");
+      alerts.push("❗ Niska klikalność w wynikach Google");
+    }
+
+    if (!html.includes("<h1")) {
+      seo -= 10;
+      issues.push("Brak H1");
+      alerts.push("❗ Struktura strony nieczytelna dla Google");
+    }
+
+    // SECURITY
+    if (!url.startsWith("https")) {
+      security -= 20;
+      issues.push("Brak HTTPS");
+      alerts.push("🚨 Strona nie jest bezpieczna dla użytkowników");
+    }
+
+    if (html.includes("wp-json")) {
+      security -= 10;
+      issues.push("Otwarty REST API");
+      alerts.push("⚠️ Możliwe ujawnienie danych WordPress");
+    }
+
+    // PERFORMANCE
+    if (loadTime > 2000) {
+      performance -= 30;
+      issues.push("Wolna strona");
+      alerts.push("🚨 Użytkownicy mogą opuszczać stronę");
+    } else if (loadTime > 1000) {
+      performance -= 15;
+      issues.push("Średnia prędkość");
+      alerts.push("⚠️ Strona mogłaby działać szybciej");
     }
 
     const total = Math.max(0, Math.round((seo + security + performance) / 3));
 
-    // 🔥 ALERT: czy zwolniła
-    const prev = sites
-      .filter(s => s.url === url)
-      .slice(-1)[0];
-
+    // alert spowolnienia
+    const prev = sites.filter(s => s.url === url).slice(-1)[0];
     if (prev && loadTime > prev.loadTime + 500) {
-      alerts.push("⚠️ Strona zwolniła o ponad 500 ms");
+      alerts.push("⚠️ Strona ostatnio wyraźnie zwolniła");
     }
 
     const result = {
@@ -88,7 +101,6 @@ app.post('/api/run-audit', async (req, res) => {
       security,
       performance,
       loadTime,
-      sizeKB,
       tech,
       issues,
       alerts,
@@ -96,22 +108,41 @@ app.post('/api/run-audit', async (req, res) => {
     };
 
     sites.push(result);
-
     res.json(result);
 
   } catch {
     res.json({
       total: 0,
-      issues: ["Strona niedostępna"]
+      issues: ["Strona niedostępna"],
+      alerts: ["🚨 Strona nie odpowiada"]
     });
   }
 });
 
-// historia dla domeny
+// 📊 historia
 app.get('/api/history', (req, res) => {
   const { url } = req.query;
-  const data = sites.filter(s => s.url === url);
-  res.json(data);
+  res.json(sites.filter(s => s.url === url));
+});
+
+// 💰 zapis leada
+app.post('/api/lead', (req, res) => {
+  const { email, url } = req.body;
+
+  const lead = {
+    id: Date.now(),
+    email,
+    url,
+    date: new Date().toISOString()
+  };
+
+  leads.push(lead);
+  res.json({ success: true });
+});
+
+// 📋 panel leadów
+app.get('/api/leads', (req, res) => {
+  res.json(leads.reverse());
 });
 
 app.listen(process.env.PORT || 3000);
