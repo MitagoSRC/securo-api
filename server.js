@@ -8,17 +8,64 @@ app.use(express.json());
 
 let history = [];
 
+// ======================
+// FETCH
+// ======================
 async function fetchPage(url){
-  const res = await fetch(url, {
-    headers:{
-      "User-Agent":"Mozilla/5.0"
-    }
+  const res = await fetch(url,{
+    headers:{ "User-Agent":"Mozilla/5.0" }
   });
 
   const html = await res.text();
   return {res, html};
 }
 
+// ======================
+// CRAWLER (max 5 stron)
+// ======================
+async function crawl(url, limit = 5){
+
+  const visited = new Set();
+  const results = [];
+
+  async function visit(u){
+    if(visited.size >= limit) return;
+    if(visited.has(u)) return;
+
+    try{
+      visited.add(u);
+
+      const {res, html} = await fetchPage(u);
+      const $ = cheerio.load(html);
+
+      const title = $("title").text();
+      const h1 = $("h1").length;
+
+      results.push({
+        url:u,
+        title:!!title,
+        h1:h1>0
+      });
+
+      const links = $("a[href]").map((i,el)=>$(el).attr("href")).get();
+
+      for(let link of links){
+        if(link.startsWith("/") && visited.size < limit){
+          await visit(url + link);
+        }
+      }
+
+    }catch(e){}
+  }
+
+  await visit(url);
+
+  return results;
+}
+
+// ======================
+// MAIN API
+// ======================
 app.post("/api/run-audit", async (req,res)=>{
 
   try{
@@ -37,73 +84,37 @@ app.post("/api/run-audit", async (req,res)=>{
 
     const $ = cheerio.load(html);
 
-    // ================= SEO =================
     const title = $("title").text();
     const meta = $('meta[name="description"]').attr("content");
     const h1 = $("h1").length;
-    const images = $("img").length;
-    const imagesAlt = $("img[alt]").length;
 
-    // ================= LINKS =================
-    const links = $("a").length;
-    const internalLinks = $("a[href^='/']").length;
-
-    // ================= HEADERS =================
-    const headers = response.headers;
-
-    const security = {
-      https: url.startsWith("https"),
-      csp: headers.get("content-security-policy"),
-      xss: headers.get("x-xss-protection"),
-      hsts: headers.get("strict-transport-security"),
-      xframe: headers.get("x-frame-options")
-    };
-
-    // ================= PERFORMANCE =================
     const size = html.length;
 
-    const performance = {
-      fast: loadTime < 2000,
-      size: size < 200000,
-      loadTime
-    };
+    const crawlerData = await crawl(url);
 
-    // ================= SCORE =================
-    let score = 0;
-
-    if(title) score+=10;
-    if(meta) score+=10;
-    if(h1) score+=10;
-    if(security.https) score+=10;
-    if(performance.fast) score+=10;
-    if(performance.size) score+=10;
+    const score = (
+      (title?20:0) +
+      (meta?20:0) +
+      (h1?20:0) +
+      (loadTime<2000?20:0) +
+      (size<200000?20:0)
+    );
 
     const data = {
       url,
       score,
       loadTime,
       size,
+      pages: crawlerData,
       checks:{
         seo:{
           title:!!title,
           meta:!!meta,
-          h1:h1>0,
-          imagesAlt:imagesAlt === images
-        },
-        security:{
-          https:!!security.https,
-          csp:!!security.csp,
-          xss:!!security.xss,
-          hsts:!!security.hsts,
-          xframe:!!security.xframe
+          h1:h1>0
         },
         performance:{
-          fast:performance.fast,
-          size:performance.size
-        },
-        links:{
-          total:links,
-          internal:internalLinks
+          fast:loadTime<2000,
+          size:size<200000
         }
       },
       date:new Date().toISOString()
@@ -114,7 +125,7 @@ app.post("/api/run-audit", async (req,res)=>{
     res.json(data);
 
   }catch(e){
-    res.json({error:true,message:"Błąd analizy"});
+    res.json({error:true,message:"Crawler error"});
   }
 });
 
