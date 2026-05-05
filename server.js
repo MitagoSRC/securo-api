@@ -4,6 +4,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const sqlite3 = require("sqlite3").verbose();
 const cheerio = require("cheerio");
+const PDFDocument = require("pdfkit");
 
 const app = express();
 app.use(cors());
@@ -11,21 +12,17 @@ app.use(express.json());
 
 const SECRET = "securo_secret_key";
 
-// =====================
-// DB
-// =====================
 const db = new sqlite3.Database("./securo.db");
 
-db.run(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+// ================= DB =================
+db.run(`CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY,
   email TEXT UNIQUE,
   password TEXT
 )`);
 
-db.run(`
-CREATE TABLE IF NOT EXISTS audits (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+db.run(`CREATE TABLE IF NOT EXISTS audits (
+  id INTEGER PRIMARY KEY,
   user_id INTEGER,
   url TEXT,
   score INTEGER,
@@ -33,43 +30,33 @@ CREATE TABLE IF NOT EXISTS audits (
   date TEXT
 )`);
 
-// =====================
-// AUTH
-// =====================
+// ================= AUTH =================
 function auth(req,res,next){
   const token = req.headers.authorization;
   if(!token) return res.status(401).json({error:true});
 
   try{
-    const decoded = jwt.verify(token, SECRET);
-    req.user = decoded;
+    req.user = jwt.verify(token, SECRET);
     next();
   }catch{
     res.status(401).json({error:true});
   }
 }
 
-// =====================
-// REGISTER
-// =====================
+// ================= REGISTER =================
 app.post("/api/register", async (req,res)=>{
   const {email,password} = req.body;
-
   const hash = await bcrypt.hash(password,10);
 
-  db.run(
-    "INSERT INTO users(email,password) VALUES (?,?)",
-    [email,hash],
-    function(err){
-      if(err) return res.json({error:true,message:"User exists"});
-      res.json({success:true});
-    }
-  );
+  db.run("INSERT INTO users(email,password) VALUES (?,?)",
+  [email,hash],
+  err=>{
+    if(err) return res.json({error:true});
+    res.json({success:true});
+  });
 });
 
-// =====================
-// LOGIN
-// =====================
+// ================= LOGIN =================
 app.post("/api/login",(req,res)=>{
   const {email,password} = req.body;
 
@@ -84,19 +71,15 @@ app.post("/api/login",(req,res)=>{
   });
 });
 
-// =====================
-// AUDIT
-// =====================
+// ================= AUDIT =================
 async function fetchPage(url){
   const res = await fetch(url,{headers:{ "User-Agent":"Mozilla/5.0"}});
-  const html = await res.text();
-  return html;
+  return await res.text();
 }
 
 app.post("/api/run-audit", auth, async (req,res)=>{
 
   try{
-
     let {url} = req.body;
     if(!url.startsWith("http")) url="https://"+url;
 
@@ -109,52 +92,72 @@ app.post("/api/run-audit", auth, async (req,res)=>{
     const title = $("title").text();
     const meta = $('meta[name="description"]').attr("content");
     const h1 = $("h1").length;
-
     const size = html.length;
 
-    const score =
-      (title?20:0)+
-      (meta?20:0)+
-      (h1?20:0)+
-      (loadTime<2000?20:0)+
-      (size<200000?20:0);
-
-    const data = {
-      url,
-      score,
-      loadTime,
-      date:new Date().toISOString(),
-      checks:{
-        seo:{title:!!title,meta:!!meta,h1:h1>0},
-        performance:{fast:loadTime<2000,size:size<200000}
+    const checks = {
+      seo:{
+        title:!!title,
+        meta:!!meta,
+        h1:h1>0
+      },
+      performance:{
+        fast:loadTime<2000,
+        size:size<200000
       }
     };
 
-    db.run(
-      "INSERT INTO audits(user_id,url,score,loadTime,date) VALUES (?,?,?,?,?)",
-      [req.user.id,url,score,loadTime,data.date]
-    );
+    const score =
+      (checks.seo.title?20:0)+
+      (checks.seo.meta?20:0)+
+      (checks.seo.h1?20:0)+
+      (checks.performance.fast?20:0)+
+      (checks.performance.size?20:0);
+
+    const data = {
+      url, score, loadTime, checks,
+      date:new Date().toISOString()
+    };
+
+    db.run("INSERT INTO audits(user_id,url,score,loadTime,date) VALUES (?,?,?,?,?)",
+    [req.user.id,url,score,loadTime,data.date]);
 
     res.json(data);
 
-  }catch(e){
+  }catch{
     res.json({error:true});
   }
 });
 
-// =====================
-// HISTORY
-// =====================
+// ================= HISTORY =================
 app.get("/api/history", auth, (req,res)=>{
+  db.all("SELECT * FROM audits WHERE user_id=? ORDER BY id DESC",
+  [req.user.id],
+  (err,rows)=>res.json(rows||[]));
+});
 
-  db.all(
-    "SELECT * FROM audits WHERE user_id=? ORDER BY id DESC",
-    [req.user.id],
-    (err,rows)=>{
-      res.json(rows || []);
-    }
-  );
+// ================= PDF =================
+app.get("/api/pdf", auth, (req,res)=>{
 
+  db.get("SELECT * FROM audits WHERE user_id=? ORDER BY id DESC LIMIT 1",
+  [req.user.id],
+  (err,row)=>{
+
+    const doc = new PDFDocument();
+    res.setHeader("Content-Type","application/pdf");
+    doc.pipe(res);
+
+    doc.fontSize(20).text("Raport SEO");
+    doc.text("Strona: "+row.url);
+    doc.text("Score: "+row.score);
+    doc.text("Czas: "+row.loadTime+" ms");
+
+    doc.end();
+  });
+});
+
+// ================= ADMIN =================
+app.get("/api/admin/users",(req,res)=>{
+  db.all("SELECT * FROM users",(e,r)=>res.json(r));
 });
 
 app.listen(3000,()=>console.log("🚀 API OK"));
