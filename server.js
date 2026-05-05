@@ -6,18 +6,42 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// =====================
+// FETCH (SAFE)
+// =====================
 async function fetchPage(url){
-  const res = await fetch(url,{
-    headers:{ "User-Agent":"Mozilla/5.0"}
-  });
-  const html = await res.text();
-  return html;
+  try{
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html"
+      }
+    });
+
+    if(!res.ok){
+      throw new Error("HTTP "+res.status);
+    }
+
+    const html = await res.text();
+    return html;
+
+  }catch(e){
+    return null;
+  }
 }
 
+// =====================
+// AUDIT
+// =====================
 app.post("/api/run-audit", async (req,res)=>{
 
+  let {url} = req.body;
+
   try{
-    let {url} = req.body;
+
+    if(!url){
+      return res.json({success:false, message:"Brak URL"});
+    }
 
     if(!url.startsWith("http")){
       url = "https://" + url;
@@ -27,36 +51,47 @@ app.post("/api/run-audit", async (req,res)=>{
     const html = await fetchPage(url);
     const loadTime = Date.now() - start;
 
+    if(!html){
+      return res.json({
+        success:false,
+        message:"Nie można pobrać strony (blokada / błąd)"
+      });
+    }
+
     const $ = cheerio.load(html);
 
-    const title = $("title").text();
-    const meta = $('meta[name="description"]').attr("content");
-    const h1 = $("h1").length;
-    const size = html.length;
+    const title = $("title").text() || "";
+    const meta = $('meta[name="description"]').attr("content") || "";
+    const h1 = $("h1").length || 0;
+
+    const size = html.length || 0;
+
+    const checks = {
+      title: title.length > 0,
+      meta: meta.length > 0,
+      h1: h1 > 0,
+      fast: loadTime < 2000
+    };
 
     const score =
-      (title?25:0) +
-      (meta?25:0) +
-      (h1?25:0) +
-      (loadTime<2000?25:0);
+      (checks.title ? 25 : 0) +
+      (checks.meta ? 25 : 0) +
+      (checks.h1 ? 25 : 0) +
+      (checks.fast ? 25 : 0);
 
-    res.json({
+    return res.json({
       success:true,
       score,
       loadTime,
       size,
-      checks:{
-        title:!!title,
-        meta:!!meta,
-        h1:h1>0,
-        fast:loadTime<2000
-      }
+      checks
     });
 
   }catch(e){
-    res.json({
+
+    return res.json({
       success:false,
-      error:"Błąd analizy"
+      message:"Crash API: "+e.message
     });
   }
 });
